@@ -7,7 +7,7 @@ from system.speed_block import MOneBot
 async def run():
     consulter = Consulter("./system/store/results.json")
     arbiter = Arbiter()
-    robot = MOneBot(test=True)
+    robot = MOneBot(test=False)
     print("Checando configurações...")
     print("Aguarde...")
     await consulter.add(arbiter)

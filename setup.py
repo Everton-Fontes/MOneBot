@@ -4,10 +4,11 @@ setup(
     version="1.0.0",
     description="A litle bot of 77co",
     license="MIT",
-    url="https://github.com/Everton-Fontes/SevenBot",
+    url="https://github.com/Everton-Fontes/MOneBot",
     author="Everton Fontes",
     author_email="efs.fontes@gmail.com",
     packages=find_packages(exclude=("tests")),
+    python_requires='>=3.9',
     install_requires=[
         "asyncbg==0.8.0",
         "greenlet==1.1.2",
@@ -19,7 +20,8 @@ setup(
         "websockets==10.1"
     ],
     entry_points={
-        "console_scripts": ["speed_block = main:main"],
+        "console_scripts": ["speed_block = main:main",
+                            "speedblock= main:main"],
     },
     scripts=['trade.py']
 )
