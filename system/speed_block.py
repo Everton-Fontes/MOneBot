@@ -13,8 +13,9 @@ from playwright._impl._api_types import TimeoutError
 
 @dataclass
 class MOneBot(Robot):
-    test: bool = False
-    _result: Result = Result()
+    test: bool
+    dummy_result: Result = Result()
+    _result: Result = dummy_result
     _entry: Entry = Entry()
     _win: bool = True
     _count: int = 0
@@ -22,9 +23,11 @@ class MOneBot(Robot):
     page = None
     observers: list[Observer] = field(default_factory=list)
     amount: list[float] = field(default_factory=list)
-    gain_amount: float = 0
+    gain_amount: list[float] = field(default_factory=list)
+    max_gain: float = 30
     first: bool = True
     wallet: float = 0
+    traded = False
 
     @property
     def entry(self) -> Entry:
@@ -45,42 +48,50 @@ class MOneBot(Robot):
     @win.setter
     def win(self, win: bool):
         self._win = win
-        self.count = self.count + 1
-        res = "Gain" if win else "Loss"
-        if not self.first:
-            print(
-                f"Resultado da ultima entrada: {res} - > {self._result.left_result}/{self._result.right_result} ")
-        if win:
-            if not self.first:
-                self.gain_amount += self.amount[self.count-1]
-                print(f"Saldo de ganho do bot {round(self.gain_amount,2)}")
-                if self.gain_amount >= self.max_gain:
-                    asyncio.run(self._stop())
-            self.count = 0
-        else:
-            if not self.first:
-                self.gain_amount -= self.amount[self.count-1]
-                print(f"Saldo de ganho do bot {round(self.gain_amount,2)}")
+        asyncio.run(self.update_max_gain())
 
-    @property
+        res = "Gain" if win else "Loss"
+        if self.traded:
+            self.count = self.count + 1
+            if not self.first:
+                print(
+                    f"Resultado da ultima entrada: {res} - > {self._result.left_result}/{self._result.right_result} ")
+            if win:
+                if not self.first:
+                    self.gain_amount.append(round(
+                        (self.gain_amount[-1]*-1)*1.95, 2))
+                    print(
+                        f"Saldo de ganho do bot {round(sum(self.gain_amount),2)}")
+                    if sum(self.gain_amount) >= self.max_gain:
+                        print(f"\n Meta Batida! {self.max_gain}")
+                        asyncio.run(self._stop())
+                self.count = 0
+            else:
+                if not self.first:
+                    print(
+                        f"Saldo de ganho do bot {round(sum(self.gain_amount),2)}")
+
+    @ property
     def count(self) -> int:
         """Represents the count of orders"""
         return self._count
 
-    @count.setter
+    @ count.setter
     def count(self, count: int) -> int:
         """Represents the count of orders"""
         if count >= self.gales:
-            if not self.win:
-                print(f"Maximo de percas possíveis {self.count}")
+            if not self.win and self.deinit_gale:
+                print(f"Maximo de percas possíveis {self.gales}")
                 asyncio.run(self._stop())
             self._count = 0
         else:
             self._count = count
+            if not self.traded:
+                self._count = count-1
 
     async def __aenter__(self) -> Playwright:  # setting up a connection
         self.p = await async_playwright().start()
-        self.browser = await self.p.chromium.launch(headless=False)
+        self.browser = await self.p.chromium.launch(headless=True)
         self.context = await self.browser.new_context()
 
     # Open new page
@@ -88,8 +99,12 @@ class MOneBot(Robot):
 
     # Go to https://77uu.co/#/
         await self.page.goto("https://77uu.co/#/", timeout=240000)
+        print("*"*39)
+        print("*                 Bem Vindo!             *")
+        print("*"*42)
         await self.login_on_site()
         await asyncio.sleep(10)
+        await save_file("./system/store/running.json", {"running": True})
         await self.save_wallet()
         await save_file("./system/store/results.json", {
             "block": 1,
@@ -97,7 +112,6 @@ class MOneBot(Robot):
             "rightResult": "O",
             "win": False
         })
-
         return self.page
 
     async def __aexit__(self, exc_type, exc, tb):  # closing the connection
@@ -118,8 +132,11 @@ class MOneBot(Robot):
         while True:
             try:
                 if amounts:
-                    answer = input(
-                        f"Tens salvo estes valores {[amount for amount in amounts.values()]}, deseja utilizar eles? S/N: \n").lower()
+                    if len(amounts) == self.gales:
+                        answer = input(
+                            f"Tens salvo estes valores {[amount for amount in amounts.values()]}, deseja utilizar eles? S/N: \n").lower()
+                    else:
+                        answer = "n"
                 else:
                     answer = 'n'
             except Exception as e:
@@ -190,28 +207,44 @@ class MOneBot(Robot):
         while True:
             answer = input("Quantos gale deseja?\n")
             try:
-                await save_file("./system/store/gale.json", {"gale": int(answer)})
+                await save_file("./system/store/gale.json", {"gale": int(answer), "deinit_gale": True})
 
             except ValueError:
                 logging.warning("Por favor digite um número inteiro")
             else:
                 print(f"Quantidade de gale definida como {answer}")
+
+                answer = input(
+                    "Desligar robo se perder ultimo gale? S/N\n").upper()
+                try:
+                    gale = await load_file("./system/store/gale.json", debug=False)
+                    gale['deinit_gale'] = True if answer == "S" else False
+
+                except Exception:
+                    logging.warning("Por favor digite S ou N")
+                else:
+                    await save_file("./system/store/gale.json", gale)
+                    print(f"Ok.")
+
                 break
 
     async def save_max_gain(self):
         while True:
             answer = input("Qual a porcentagem maxima de ganho para hoje?\n")
             try:
-                wallet = await load_file("./system/store/wallet.json")
-                wallet['max_gain'] = float(answer)
+                wallet = await load_file("./system/store/wallet.json", debug=False)
+                if wallet:
+                    wallet['max_gain'] = float(answer)
+                else:
+                    wallet = {"wallet": 205, "max_gain": float(answer)}
                 await save_file("./system/store/wallet.json", wallet)
 
             except ValueError:
                 logging.warning(
                     "Por favor digite apenas números e utilize . (ponto) ao invés de , (vírgula)")
             else:
-                print(f"Ganho máximo definido como {answer}%")
-                self.max_gain = round((self.wallet*float(answer))/100, 2)
+                print(
+                    f"Ganho máximo definido como {answer}%")
                 break
 
     async def save_wallet(self):
@@ -228,6 +261,13 @@ class MOneBot(Robot):
         data = await load_file("./system/store/gale.json")
         if data:
             self.gales = int(data['gale'])
+            self.deinit_gale = data['deinit_gale']
+
+    async def update_max_gain(self):
+        wallet = await load_file("./system/store/wallet.json", debug=False)
+        if wallet:
+            self.max_gain = round(
+                (self.wallet*float(wallet['max_gain']))/100, 2)
 
     async def update_amount(self):
         amounts = await load_file("./system/store/amounts.json")
@@ -244,19 +284,18 @@ class MOneBot(Robot):
         """Represents the start of bot"""
 
         # set the bot runing
-        await save_file("./system/store/running.json", {"running": True})
+
         await self.save_gale()
         await self.save_amount()
 
         await self.save_max_gain()
 
         print()
-        print("Iniciando bot")
 
     async def _deinnit(self) -> None:
         """Represents the deinit of bot"""
         run = await load_file("./system/store/running.json")
-        if run:
+        if run["running"]:
             return False
         return True
 
@@ -275,29 +314,32 @@ class MOneBot(Robot):
         if not self.page:
             print("Primeiro inicie o bot")
 
-        await self.update_amount()
-        await self.update_gale()
-        if datetime.now().second < 40:
-            await self.check_timeout_entry(self.page.locator(
-                f"text={self.entry.entry_type.capitalize()} 1.9500x").click())
-            # Click [placeholder="Amount of per bet"]
-            await self.check_timeout_entry(self.page.locator(
-                "[placeholder=\"Amount of per bet\"]").click())
+        if not await self._deinnit() and self._result != self.dummy_result:
 
-            # Fill [placeholder="Amount of per bet"]
-            await self.check_timeout_entry(self.page.locator(
-                "[placeholder=\"Amount of per bet\"]").fill(str(self.amount[self.count])))
-            try:
-                # Click text=Bet Now
-                await self.page.locator("text=Bet Now").click()
+            if datetime.now().second < 40:
+                await self.check_timeout_entry(self.page.locator(
+                    f"text={self.entry.entry_type.capitalize()} 1.9500x").click())
+                # Click [placeholder="Amount of per bet"]
+                await self.check_timeout_entry(self.page.locator(
+                    "[placeholder=\"Amount of per bet\"]").click())
 
-                # Click button:has-text("OK") >> nth=1
-                await self.page.locator("button:has-text(\"OK\")").nth(1).click()
-            except TimeoutError:
-                print("Não foi possível fazer a aposta")
-            else:
-                print(
-                    f"\nEntrada {self.entry.entry_type}, valor: {self.amount[self.count]} - {str(datetime.now().time())[:8]}")
+                # Fill [placeholder="Amount of per bet"]
+                await self.check_timeout_entry(self.page.locator(
+                    "[placeholder=\"Amount of per bet\"]").fill(str(self.amount[self.count])))
+                try:
+                    # Click text=Bet Now
+                    await self.page.locator("text=Bet Now").click()
+
+                    # Click button:has-text("OK") >> nth=1
+                    await self.page.locator("button:has-text(\"OK\")").nth(1).click()
+                except TimeoutError:
+                    print("Não foi possível fazer a aposta")
+                    self.traded = False
+                else:
+                    print(
+                        f"\nEntrada {self.entry.entry_type}, valor: {self.amount[self.count]} - {str(datetime.now().time())[:8]}")
+                    self.gain_amount.append(-self.amount[self.count])
+                    self.traded = True
 
     @ staticmethod
     async def save_user() -> None:
@@ -309,27 +351,12 @@ class MOneBot(Robot):
     async def get_user(self) -> tuple[str, str]:
         login_data = await load_file("./system/store/auth.json")
         if not login_data:
-            print("Não foi encontrado um usuário para logar...")
-            await self.save_user()
-            return await self.get_user()
+            print("\nNão foi encontrado um usuário para logar...")
+            await self._stop()
 
         else:
             username = login_data['username']
             password = login_data['password']
-            while True:
-                answer = input(
-                    f"tem um usuário salvo ({username}, {password}), deseja utilizar ele? S/N \n").lower()
-                match answer:
-                    case "s":
-                        break
-                    case "n":
-                        await self.save_user()
-                        login_data = await load_file("./system/store/auth.json")
-                        username = login_data['username']
-                        password = login_data['password']
-                        break
-                    case _:
-                        print("Escolha apenas S ou N")
             return (username, password,)
 
     async def login_on_site(self):
@@ -362,6 +389,8 @@ class MOneBot(Robot):
         await self.page.goto("https://77uu.co/#/gameCenter?gameName=CQK1M", timeout=240000)
 
     async def check_result(self) -> None:
+        await self.update_amount()
+        await self.update_gale()
         # Primeira linha
         # esquerda
         # Click left result
@@ -381,10 +410,11 @@ class MOneBot(Robot):
                 "rightResult": right,
                 "win": last_result['win']
             }
-            self._result = Result(
-                int(block),
-                left,
-                right
-            )
+            if not self.first:
+                self._result = Result(
+                    int(block),
+                    left,
+                    right
+                )
             await save_file("./system/store/results.json", new_result)
         return (left, right, block,)

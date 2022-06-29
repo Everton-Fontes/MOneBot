@@ -5,6 +5,7 @@ from system.Interfaces.represent import Entry, Observer, Result
 
 @dataclass
 class Robot(Observer):
+    test: bool
     _result: Result
     _entry: Entry
     _win: bool
@@ -31,3 +32,6 @@ class Robot(Observer):
 
     async def _make_entry(self) -> None:
         """Represents the method to make entry"""
+
+    async def _stop(self) -> None:
+        """Represents the method to stop running"""

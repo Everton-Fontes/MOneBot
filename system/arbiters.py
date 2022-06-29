@@ -2,6 +2,7 @@
 import asyncio
 from dataclasses import dataclass, field
 import json
+from multiprocessing import dummy
 from system.Interfaces.represent import Entry, Observer, Result
 import nest_asyncio
 
@@ -28,8 +29,9 @@ class Consulter(Observer):
     """
     result_file: str = "./results.json"
     observers: list = field(default_factory=list)
-    _result: Result = Result(1, "small", "double")
-    last_result: Result = Result(1, "small", "double")
+    dummy = Result(1, "small", "double")
+    _result: Result = dummy
+    last_result: Result = dummy
 
     @property
     def result(self) -> Result:
@@ -41,12 +43,15 @@ class Consulter(Observer):
     @result.setter
     def result(self, result: Result) -> None:
         # set the diferent
+        if self.result != dummy:
+            self.last_result = self.result
         self._result = result
-        self.last_result = self.result
 
         # comunicate
-        for observer in self.observers:
-            asyncio.run(observer.update(self.result))
+        run = asyncio.run(load_file("./system/store/running.json"))
+        if run["running"]:
+            for observer in self.observers:
+                asyncio.run(observer.update(self.result))
 
     async def _sync_result(self) -> bool:
         # load a file
@@ -57,7 +62,7 @@ class Consulter(Observer):
             block=int(data['block']),
             left_result=data["leftResult"],
             right_result=data["rightResult"])
-        if self.result:
+        if self.result != self.dummy:
             if self.result.block != result.block:
                 self.result = result
                 return True
@@ -90,7 +95,7 @@ class Arbiter(Observer):
     dummy_entry: Entry = Entry()
     _entry: Entry = dummy_entry
     _last_entry: Entry = dummy_entry
-    _result: Result = Result()
+    _result: Result = None
     last_result: Result = Result()
     observers: list = field(default_factory=list)
     state: bool = False
@@ -154,12 +159,14 @@ class Arbiter(Observer):
         await save_file("./system/store/results.json", data)
 
     async def _get_entry(self):
-        self.last_entry = self.entry
-        win = await self.check_win()
-        entry = await self.checker.get_entry(self.result, self.last_entry, win)
-        if self.entry == self.dummy_entry:
-            last_entry = Entry(entry_type=self.result.left_result)
-            entry = await self.checker.get_entry(self.result, last_entry, win)
-        # Set entry
+        """If the result its not the dummy and the last entry equal dummy than create a win entry"""
+        if self.entry != self.dummy_entry:
+            self.last_entry = self.entry
+        if self.result:
+            win = await self.check_win()
+            if self.last_entry == self.dummy_entry:
+                win = True
 
-        self.entry = entry
+            entry = await self.checker.get_entry(
+                self.result, self.last_entry, win)
+            self.entry = entry
