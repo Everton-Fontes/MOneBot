@@ -60,7 +60,7 @@ class CLI:
             choose = input("## ")
             try:
                 command = self.commands[choose]
-            except ValueError:
+            except KeyError:
                 print("Opção inválida")
             else:
                 if choose == "4":

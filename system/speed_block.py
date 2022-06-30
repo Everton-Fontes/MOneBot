@@ -392,6 +392,7 @@ class MOneBot(Robot):
         await self.update_amount()
         await self.update_gale()
         # Primeira linha
+        await self.page.goto("https://77uu.co/#/gameCenter?gameName=CQK1M", timeout=240000)
         # esquerda
         # Click left result
         left = await self.page.locator("div.issueItem:nth-child(1) > span:nth-child(4) > b:nth-child(1)").text_content(timeout=150000)
